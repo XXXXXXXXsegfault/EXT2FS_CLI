@@ -90,7 +90,6 @@ unsigned long long int devsize;
 HANDLE hDev;
 unsigned int groups;
 unsigned char dev_io_lock=0;
-unsigned int dev_io_writes=0;
 void read_raw_blocks(unsigned int off,void *ptr,unsigned int count)
 {
 	LARGE_INTEGER off_b={0};
@@ -170,18 +169,58 @@ void save_sb(void)
 	write_raw_blocks(0,buf,buf_size);
 }
 unsigned char ext2_io_lock=0;
-#define CACHE_PAGES 256
-#define CACHE_PAGE_BLOCKS 64
-
+#define CACHE_PAGES 64
+#define CACHE_PAGE_BLOCKS 512
+unsigned int p_rand(unsigned int max)
+{
+	static unsigned long long int a=0x129a77e66e25062f,b=0x8f7ce0e09de11af4;
+	unsigned int t=clock()&0xff;
+	unsigned int w[8];
+	unsigned int x=2,x1;
+	w[0]=a;
+	w[1]=a>>32;
+	while(x<8)
+	{
+		w[x]=(w[x-2]^b)+(w[x-1]&b>>32);
+		x++;
+	}
+	x=0;
+	while(x<t+32)
+	{
+		x1=x%6;
+		w[x1]*=w[x1+1];
+		w[x1]|=w[x1+2];
+		x++;
+	}
+	a=w[0]|(unsigned long long int)w[1]<<32;
+	b=w[6]|(unsigned long long int)w[7]<<32;
+	return b%max;
+}
+int chance(unsigned int m,unsigned int n)
+{
+	if(m>=n)
+	{
+		return 1;
+	}
+	if(m==0)
+	{
+		return 0;
+	}
+	if(p_rand(n)<m)
+	{
+		return 1;
+	}
+	return 0;
+}
 struct ext2_cache_struct
 {
-	unsigned char bitmap[CACHE_PAGE_BLOCKS/8];
+	unsigned int bitmap[CACHE_PAGE_BLOCKS/32];
 	unsigned int start;
 	unsigned char *data;
 } ext2_cache[CACHE_PAGES]={0};
-void ext2_sync(void)
+void ext2_sync(unsigned char mode)
 {
-	unsigned int x,y;
+	unsigned int x,y,y1,l;
 	while(lock_set8(&ext2_io_lock,1));
 	x=0;
 	while(x<CACHE_PAGES)
@@ -189,45 +228,56 @@ void ext2_sync(void)
 		if(ext2_cache[x].data)
 		{
 			y=0;
-			while(y<CACHE_PAGE_BLOCKS/8)
+			l=0;
+			while(y<CACHE_PAGE_BLOCKS/32)
 			{
 				if(ext2_cache[x].bitmap[y])
 				{
-					break;
+					if(!l)
+					{
+						y1=y;
+					}
+					l++;
+					ext2_cache[x].bitmap[y]=0;
+				}
+				else
+				{
+					if(l)
+					{
+						write_raw_blocks(ext2_cache[x].start+y1*32,ext2_cache[x].data+(y1*32<<sb.block_size+10),l*32);
+					}
+					l=0;
 				}
 				y++;
 			}
-			if(y!=CACHE_PAGE_BLOCKS/8)
+			if(l)
 			{
-				write_raw_blocks(ext2_cache[x].start,ext2_cache[x].data,CACHE_PAGE_BLOCKS);
+				write_raw_blocks(ext2_cache[x].start+y1*32,ext2_cache[x].data+(y1*32<<sb.block_size+10),l*32);
 			}
-			free(ext2_cache[x].data);
+			if(mode||chance(1,16));
+			{
+				free(ext2_cache[x].data);
+				ext2_cache[x].data=NULL;
+			}
 		}
 		x++;
 	}
-	memset(ext2_cache,0,sizeof(ext2_cache));
-	if(lock_set8(&sb_changed,0))
+	if(mode||chance(1,16))
 	{
-		save_sb();
+		if(lock_set8(&sb_changed,0))
+		{
+			save_sb();
+		}
 	}
-	dev_io_writes=0;
+	
 	ext2_io_lock=0;
 }
 DWORD WINAPI T_ext2_io(LPVOID lpParameter)
 {
-	unsigned int t1=CACHE_PAGES*CACHE_PAGE_BLOCKS*6/10,t=t1;
 	while(1)
 	{
-		if(dev_io_writes>=t)
-		{
-			ext2_sync();
-			t=t1;
-		}
-		else
-		{
-			t=t*3/4+1;
-		}
-		Sleep(50);
+		ext2_sync(0);
+		Sleep(4000);
 	}
 }
 void read_block(unsigned int start,void *ptr)
@@ -263,12 +313,13 @@ void read_block(unsigned int start,void *ptr)
 		read_raw_blocks(start1,ext2_cache[x1].data,CACHE_PAGE_BLOCKS);
 		ext2_cache[x1].start=start1;
 		memcpy(ptr,ext2_cache[x1].data+(start-start1<<sb.block_size+10),1<<sb.block_size+10);
+		ext2_io_lock=0;
 	}
 	else
 	{
 		read_raw_blocks(start,ptr,1);
+		ext2_io_lock=0;
 	}
-	ext2_io_lock=0;
 }
 void write_block(unsigned int start,void *ptr)
 {
@@ -286,8 +337,7 @@ void write_block(unsigned int start,void *ptr)
 			if(ext2_cache[x].start==start1)
 			{
 				memcpy(ext2_cache[x].data+(start-start1<<sb.block_size+10),ptr,1<<sb.block_size+10);
-				ext2_cache[x].bitmap[start-start1>>3]|=1<<(start-start1&7);
-				dev_io_writes++;
+				ext2_cache[x].bitmap[start-start1>>5]|=1<<(start-start1&31);
 				ext2_io_lock=0;
 				return;
 			}
@@ -303,15 +353,14 @@ void write_block(unsigned int start,void *ptr)
 		read_raw_blocks(start1,ext2_cache[x1].data,CACHE_PAGE_BLOCKS);
 		ext2_cache[x1].start=start1;
 		memcpy(ext2_cache[x1].data+(start-start1<<sb.block_size+10),ptr,1<<sb.block_size+10);
-		ext2_cache[x1].bitmap[start-start1>>3]|=1<<(start-start1&7);
-		dev_io_writes++;
+		ext2_cache[x1].bitmap[start-start1>>5]|=1<<(start-start1&31);
+		ext2_io_lock=0;
 	}
 	else
 	{
 		write_raw_blocks(start,ptr,1);
+		ext2_io_lock=0;
 	}
-	
-	ext2_io_lock=0;
 }
 struct file
 {

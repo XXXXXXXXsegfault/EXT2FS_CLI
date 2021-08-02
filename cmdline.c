@@ -1,7 +1,7 @@
 void cmd_help(int argc,char **argv);
 void cmd_exit(int argc,char **argv)
 {
-	ext2_sync();
+	ext2_sync(1);
 	exit(0);
 }
 unsigned int current_dir=2;

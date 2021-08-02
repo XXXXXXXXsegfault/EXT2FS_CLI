@@ -1,14 +1,16 @@
 #include <stdio.h>
 #include <conio.h>
 #include <windows.h>
+#include <time.h>
 char dev_path_buf[4096];
 char *dev_path;
 unsigned char mode=0;
+void ext2_sync(unsigned char mode);
 void err_quit(void)
 {
 	if(mode)
 	{
-		ext2_sync();
+		ext2_sync(1);
 	}
 	printf("\nPress any key to continue.\n");
 	getch();
