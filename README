@@ -1,0 +1,7 @@
+EXT2FS_CLI -- Read/write EXT2 filesystem from Windows.
+You have to input the name of device or image file which contains EXT2 filesystem before accessing it. Valid device names in Windows are "\\.\PhysicalDrive0", "\\.\D:", etc.
+If successful, the string "EXT2FS>> " will be printed, and you can input commands to access files in EXT2 filesystem.
+
+This program can only run in Windows.
+Do not use this program to read/write EXT4 filesystem.
+Exiting from this program abnormally may corrupt filesystem.
