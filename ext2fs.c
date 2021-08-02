@@ -44,10 +44,6 @@ void input_path_name(void)
 #include "cmdline.c"
 int main(int argc,char *argv[])
 {
-	unsigned char buf[4096];
-	struct file *root;
-	unsigned int fi;
-	unsigned long long int x=0;
 	if(argc<2)
 	{
 		printf("Input device name (e.g. \"\\\\.\\D:\"): ");

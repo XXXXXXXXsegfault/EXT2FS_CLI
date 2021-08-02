@@ -169,32 +169,34 @@ void save_sb(void)
 	write_raw_blocks(0,buf,buf_size);
 }
 unsigned char ext2_io_lock=0;
-#define CACHE_PAGES 64
-#define CACHE_PAGE_BLOCKS 512
+#define CACHE_PAGES 16
+#define CACHE_PAGE_BLOCKS 4096
 unsigned int p_rand(unsigned int max)
 {
-	static unsigned long long int a=0x129a77e66e25062f,b=0x8f7ce0e09de11af4;
-	unsigned int t=clock()&0xff;
-	unsigned int w[8];
-	unsigned int x=2,x1;
-	w[0]=a;
-	w[1]=a>>32;
-	while(x<8)
+	static unsigned int t=1234;
+	unsigned int a[64]={0x671d8983,0x0c14344a,0xd14964f6,0xcb7123df};
+	unsigned int x=4;
+	unsigned int result=0;
+	t+=clock()+0x13505e7d;
+	a[0]^=t;
+	a[1]^=t;
+	a[2]^=t;
+	a[3]^=t;
+	while(x<64)
 	{
-		w[x]=(w[x-2]^b)+(w[x-1]&b>>32);
+		a[x]=(a[x-4]&a[x-3])^(a[x-2]&a[x-1])^~a[x-3];
 		x++;
 	}
 	x=0;
-	while(x<t+32)
+	while(x<64)
 	{
-		x1=x%6;
-		w[x1]*=w[x1+1];
-		w[x1]|=w[x1+2];
+		result=result&(a[x]>>20|a[x]<<12);
+		result=result|(a[x]>>5|a[x]<<27);
+		result=result+(a[x]>>15|a[x]<<17);
+		result=result^(a[x]>>13|a[x]<<19);
 		x++;
 	}
-	a=w[0]|(unsigned long long int)w[1]<<32;
-	b=w[6]|(unsigned long long int)w[7]<<32;
-	return b%max;
+	return result%max;
 }
 int chance(unsigned int m,unsigned int n)
 {
@@ -277,7 +279,7 @@ DWORD WINAPI T_ext2_io(LPVOID lpParameter)
 	while(1)
 	{
 		ext2_sync(0);
-		Sleep(4000);
+		Sleep(8000);
 	}
 }
 void read_block(unsigned int start,void *ptr)
