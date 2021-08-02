@@ -128,6 +128,7 @@ void cmd_pull(int argc,char **argv)
 {
 	if(argc<3)
 	{
+		printf("pull: Too few arguments\n");
 		return;
 	}
 	unsigned int ninode;
@@ -164,6 +165,7 @@ void cmd_push(int argc,char **argv)
 {
 	if(argc<3)
 	{
+		printf("push: Too few arguments\n");
 		return;
 	}
 	unsigned int ninode;
@@ -249,6 +251,7 @@ void cmd_mknod(int argc,char **argv)
 	unsigned int ninode;
 	if(argc<3)
 	{
+		printf("mknod: Too few arguments\n");
 		return;
 	}
 	x=strlen(argv[1]);
@@ -318,6 +321,7 @@ void cmd_mkdir(int argc,char **argv)
 	unsigned int ninode;
 	if(argc<2)
 	{
+		printf("mkdir: Too few arguments\n");
 		return;
 	}
 	struct file *fp;
@@ -365,6 +369,7 @@ void cmd_unlink(int argc,char **argv)
 	unsigned int ninode;
 	if(argc<2)
 	{
+		printf("unlink: Too few arguments\n");
 		return;
 	}
 	x=strlen(argv[1]);
@@ -412,6 +417,7 @@ void cmd_rmdir(int argc,char **argv)
 	unsigned int ninode;
 	if(argc<2)
 	{
+		printf("rmdir: Too few arguments\n");
 		return;
 	}
 	x=strlen(argv[1]);
@@ -465,6 +471,7 @@ void cmd_symlink(int argc,char **argv)
 	unsigned int ninode;
 	if(argc<3)
 	{
+		printf("symlink: Too few arguments\n");
 		return;
 	}
 	x=strlen(argv[2]);
@@ -511,6 +518,7 @@ void cmd_readlink(int argc,char **argv)
 {
 	if(argc<2)
 	{
+		printf("readlink: Too few arguments\n");
 		return;
 	}
 	struct file *fp;
@@ -519,12 +527,18 @@ void cmd_readlink(int argc,char **argv)
 	unsigned int n;
 	if(ninode==0)
 	{
-		printf("readlink: Cannot open link.");
+		printf("readlink: Cannot open link.\n");
 		return;
 	}
 	if((fp=file_load(ninode,FILE_MODE_RO))==NULL)
 	{
-		printf("readlink: Cannot open link.");
+		printf("readlink: Cannot open link.\n");
+		return;
+	}
+	if((fp->inode.mode&0170000)!=0120000)
+	{
+		printf("readlink: Not a symbolic link.\n");
+		file_release(fp);
 		return;
 	}
 	n=file_readlink(fp,buf);
@@ -538,6 +552,7 @@ void cmd_link(int argc,char **argv)
 	unsigned int ninode,old_inode;
 	if(argc<3)
 	{
+		printf("link: Too few arguments\n");
 		return;
 	}
 	x=strlen(argv[2]);
@@ -611,6 +626,7 @@ void cmd_cd(int argc,char **argv)
 {
 	if(argc<2)
 	{
+		printf("cd: Too few arguments\n");
 		return;
 	}
 	unsigned int ninode=find_dirent_by_path(current_dir,argv[1]);
@@ -706,6 +722,7 @@ void cmd_chmod(int argc,char **argv)
 {
 	if(argc<3)
 	{
+		printf("chmod: Too few arguments\n");
 		return;
 	}
 	unsigned int ninode=find_dirent_by_path(current_dir,argv[1]);
@@ -730,6 +747,7 @@ void cmd_chown(int argc,char **argv)
 {
 	if(argc<4)
 	{
+		printf("chown: Too few arguments\n");
 		return;
 	}
 	unsigned int ninode=find_dirent_by_path(current_dir,argv[1]);
