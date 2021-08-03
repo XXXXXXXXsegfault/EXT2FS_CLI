@@ -169,8 +169,8 @@ void save_sb(void)
 	write_raw_blocks(0,buf,buf_size);
 }
 unsigned char ext2_io_lock=0;
-#define CACHE_PAGES 16
-#define CACHE_PAGE_BLOCKS 4096
+#define CACHE_PAGES 256
+#define CACHE_PAGE_BLOCKS 512
 unsigned int p_rand(unsigned int max)
 {
 	static unsigned int t=1234;
@@ -222,56 +222,78 @@ struct ext2_cache_struct
 } ext2_cache[CACHE_PAGES]={0};
 void ext2_sync(unsigned char mode)
 {
-	unsigned int x,y,y1,l;
+	static unsigned int x=0;
+	unsigned int y,y1,l;
 	while(lock_set8(&ext2_io_lock,1));
-	x=0;
-	while(x<CACHE_PAGES)
+	if(mode)
 	{
-		if(ext2_cache[x].data)
-		{
-			y=0;
-			l=0;
-			while(y<CACHE_PAGE_BLOCKS/32)
-			{
-				if(ext2_cache[x].bitmap[y])
-				{
-					if(!l)
-					{
-						y1=y;
-					}
-					l++;
-					ext2_cache[x].bitmap[y]=0;
-				}
-				else
-				{
-					if(l)
-					{
-						write_raw_blocks(ext2_cache[x].start+y1*32,ext2_cache[x].data+(y1*32<<sb.block_size+10),l*32);
-					}
-					l=0;
-				}
-				y++;
-			}
-			if(l)
-			{
-				write_raw_blocks(ext2_cache[x].start+y1*32,ext2_cache[x].data+(y1*32<<sb.block_size+10),l*32);
-			}
-			if(mode||chance(1,16));
-			{
-				free(ext2_cache[x].data);
-				ext2_cache[x].data=NULL;
-			}
-		}
-		x++;
+		x=0;
 	}
-	if(mode||chance(1,16))
+X1:
+	if(ext2_cache[x].data)
+	{
+		y=0;
+		l=0;
+		while(y<CACHE_PAGE_BLOCKS/32)
+		{
+			if(ext2_cache[x].bitmap[y])
+			{
+				if(!l)
+				{
+					y1=y;
+				}
+				l++;
+				ext2_cache[x].bitmap[y]=0;
+			}
+			else
+			{
+				if(l)
+				{
+					write_raw_blocks(ext2_cache[x].start+y1*32,ext2_cache[x].data+(y1*32<<sb.block_size+10),l*32);
+				}
+				l=0;
+			}
+			y++;
+		}
+		if(l)
+		{
+			write_raw_blocks(ext2_cache[x].start+y1*32,ext2_cache[x].data+(y1*32<<sb.block_size+10),l*32);
+		}
+		if(mode||chance(1,8));
+		{
+			free(ext2_cache[x].data);
+			ext2_cache[x].data=NULL;
+		}
+	}
+	if(mode)
+	{
+		if(x<CACHE_PAGES-1)
+		{
+			x++;
+			goto X1;
+		}
+		else
+		{
+			if(lock_set8(&sb_changed,0))
+			{
+				save_sb();
+			}
+			ext2_io_lock=0;
+			return;
+		}
+	}
+	if(chance(1,256))
 	{
 		if(lock_set8(&sb_changed,0))
 		{
 			save_sb();
 		}
 	}
-	
+	x++;
+	if(x==CACHE_PAGES)
+	{
+		x=0;
+	}
 	ext2_io_lock=0;
 }
 DWORD WINAPI T_ext2_io(LPVOID lpParameter)
@@ -279,7 +301,7 @@ DWORD WINAPI T_ext2_io(LPVOID lpParameter)
 	while(1)
 	{
 		ext2_sync(0);
-		Sleep(8000);
+		Sleep(2000/CACHE_PAGES+1);
 	}
 }
 void read_block(unsigned int start,void *ptr)
@@ -1339,10 +1361,7 @@ int file_unlink(struct file *dir,char *name)
 					if(!memcmp(dirent->name,name,l))
 					{
 						ninode=dirent->inode;
-						dirent->inode=0;
-						dirent->name_len=0;
-						dirent->file_type=0;
-						file_write_block(dir,start,buf);
+						
 						goto found;
 					}
 				}
@@ -1359,6 +1378,10 @@ found:
 	{
 		return 0;
 	}
+	dirent->inode=0;
+	dirent->name_len=0;
+	dirent->file_type=0;
+	file_write_block(dir,start,buf);
 	if(inode.links!=1)
 	{
 		inode.links--;

@@ -1,6 +1,7 @@
 void cmd_help(int argc,char **argv);
 void cmd_exit(int argc,char **argv)
 {
+	printf("Synchronizing data, please wait.\n");
 	ext2_sync(1);
 	exit(0);
 }
@@ -124,6 +125,69 @@ void cmd_ls(int argc,char **argv)
 		free(t);
 	}
 }
+int do_pull(struct file *fpi,char *path)
+{
+	static unsigned char buf[8192];
+	unsigned char buf1[264];
+	unsigned int n;
+	FILE *fpo;
+	struct file *new_fpi;
+	unsigned long long int off=0;
+	struct ext2_dirent *dirent=(void *)buf1;
+	char *new_path;
+	unsigned int l;
+	switch(fpi->inode.mode&0170000)
+	{
+		case 0100000:
+		if((fpo=fopen(path,"wb"))==NULL)
+		{
+			printf("pull: Cannot open \"%s\".\n",path);
+			return 1;
+		}
+		while(n=file_read(fpi,off,8192,buf))
+		{
+			fwrite(buf,n,1,fpo);
+			off+=n;
+		}
+		fclose(fpo);
+		return 0;
+		case 040000:
+		CreateDirectory(path,NULL);
+		while(off=file_readdir(fpi,off,dirent))
+		{
+			if(dirent->name_len==2&&dirent->name[0]=='.'&&dirent->name[1]=='.')
+			{
+				continue;
+			}
+			if(dirent->name_len==1&&dirent->name[0]=='.')
+			{
+				continue;
+			}
+			l=strlen(path);
+			if(new_fpi=file_load(dirent->inode,FILE_MODE_RO))
+			{
+				if(new_path=malloc(l+dirent->name_len+2))
+				{
+					memcpy(new_path,path,l);
+					new_path[l]='\\';
+					memcpy(new_path+l+1,dirent->name,dirent->name_len);
+					new_path[l+dirent->name_len+1]=0;
+					if(do_pull(new_fpi,new_path))
+					{
+						free(new_path);
+						file_release(new_fpi);
+						return 1;
+					}
+					free(new_path);
+				}
+				file_release(new_fpi);
+			}
+		}
+		return 0;
+		default:printf("pull: Inode %u is not a regular file or a directory, ingored.\n",fpi->ninode);
+		return 0;
+	}
+}
 void cmd_pull(int argc,char **argv)
 {
 	if(argc<3)
@@ -133,10 +197,7 @@ void cmd_pull(int argc,char **argv)
 	}
 	unsigned int ninode;
 	struct file *fpi;
-	FILE *fpo;
-	static unsigned char buf[8192];
-	unsigned int n;
-	unsigned long long int off=0;
+	
 	if((ninode=find_dirent_by_path(current_dir,argv[1]))==0)
 	{
 		printf("pull: Cannot open \"%s\".\n",argv[1]);
@@ -147,19 +208,88 @@ void cmd_pull(int argc,char **argv)
 		printf("pull: Cannot open \"%s\".\n",argv[1]);
 		return;
 	}
-	if((fpi->inode.mode&0170000)!=0100000||(fpo=fopen(argv[2],"wb"))==NULL)
-	{
-		printf("pull: Cannot open \"%s\".\n",argv[2]);
-		file_release(fpi);
-		return;
-	}
-	while(n=file_read(fpi,off,8192,buf))
-	{
-		fwrite(buf,n,1,fpo);
-		off+=n;
-	}
-	fclose(fpo);
+	do_pull(fpi,argv[1]);
 	file_release(fpi);
+}
+int do_push(struct file *dir,char *name,char *path)
+{
+	unsigned long long int off=0;
+	static unsigned char buf[8192];
+	FILE *fpi;
+	struct file *fpo;
+	HANDLE hfind;
+	WIN32_FIND_DATA fdata;
+	unsigned int ninode,n,l;
+	char *new_path;
+	if(fpi=fopen(path,"rb"))
+	{
+		if(ninode=file_mknod(dir,name,0100644,0,NULL))
+		{
+			if(fpo=file_load(ninode,FILE_MODE_RW))
+			{
+				while(n=fread(buf,1,8192,fpi))
+				{
+					if(file_write(fpo,off,n,buf)!=n)
+					{
+						printf("push: \"%s\": Copying did not complete.\n",name);
+						break;
+					}
+					off+=n;
+				}
+				file_release(fpo);
+			}
+			else
+			{
+				printf("push: \"%s\": Copying did not complete.\n",name);
+			}
+		}
+		else
+		{
+			printf("push: Cannot create file \"%s\".\n",name);
+		}
+		fclose(fpi);
+		return 0;
+	}
+	l=strlen(path);
+	if(new_path=malloc(l+260))
+	{
+		memcpy(new_path,path,l);
+		new_path[l]='\\';
+		new_path[l+1]='*';
+		new_path[l+2]=0;
+		if((hfind=FindFirstFile(new_path,&fdata))!=INVALID_HANDLE_VALUE)
+		{
+			if(ninode=file_mkdir(dir,name))
+			{
+				if(fpo=file_load(ninode,FILE_MODE_RW))
+				{
+					do
+					{
+						if(!strcmp(fdata.cFileName,".")||!strcmp(fdata.cFileName,".."))
+						{
+							continue;
+						}
+						strcpy(new_path+l+1,fdata.cFileName);
+						do_push(fpo,fdata.cFileName,new_path);
+					}
+					while(FindNextFile(hfind,&fdata));
+					file_release(fpo);
+				}
+				
+			}
+			else
+			{
+				printf("push: Cannot create directory \"%s\".\n",name);
+			}
+			FindClose(hfind);
+		}
+		else
+		{
+			printf("push: Cannot open \"%s\".\n",path);
+		}
+		free(new_path);
+	}
+	return 0;
 }
 void cmd_push(int argc,char **argv)
 {
@@ -169,16 +299,8 @@ void cmd_push(int argc,char **argv)
 		return;
 	}
 	unsigned int ninode;
-	unsigned int x=strlen(argv[2]),n;
-	FILE *fpi;
+	unsigned int x=strlen(argv[2]);
 	struct file *fpo;
-	unsigned long long int off=0;
-	static unsigned char buf[8192];
-	if((fpi=fopen(argv[1],"rb"))==NULL)
-	{
-		printf("push: Cannot open \"%s\".\n",argv[1]);
-		return;
-	}
 	while(x)
 	{
 		x--;
@@ -206,41 +328,20 @@ void cmd_push(int argc,char **argv)
 	if(ninode==0||strlen(argv[2]+x)>255)
 	{
 		printf("push: Cannot create file\n");
-		fclose(fpi);
 		return;
 	}
 	if((fpo=file_load(ninode,FILE_MODE_RW))==NULL)
 	{
 		printf("push: Cannot create file\n");
-		fclose(fpi);
 		return;
 	}
-	if((fpo->inode.mode&0170000)!=040000||(ninode=file_mknod(fpo,argv[2]+x,0100644,0,NULL))==0)
+	if((fpo->inode.mode&0170000)!=040000)
 	{
 		printf("push: Cannot create file\n");
-		fclose(fpi);
 		file_release(fpo);
 		return;
 	}
-	file_release(fpo);
-	if((fpo=file_load(ninode,FILE_MODE_RW))==NULL)
-	{
-		printf("push: Copying did not complete.\n");
-		fclose(fpi);
-		return;
-	}
-	while(n=fread(buf,1,8192,fpi))
-	{
-		if(file_write(fpo,off,n,buf)!=n)
-		{
-			printf("push: Copying did not complete.\n");
-			fclose(fpi);
-			file_release(fpo);
-			return;
-		}
-		off+=n;
-	}
-	fclose(fpi);
+	do_push(fpo,argv[2]+x,argv[1]);
 	file_release(fpo);
 }
 void cmd_mknod(int argc,char **argv)
@@ -463,6 +564,120 @@ void cmd_rmdir(int argc,char **argv)
 		file_release(fp);
 		return;
 	}
+	file_release(fp);
+}
+int do_removeall(struct file *dir,char *name)
+{
+	unsigned int ninode;
+	struct file *fp;
+	unsigned char buf[264];
+	struct ext2_dirent *dirent=(void *)buf;
+	unsigned int off=0;
+	char new_name[256];
+	
+	if(ninode=file_search(dir,name))
+	{
+		if(ninode==current_dir)
+		{
+			printf("removeall: Cannot remove \"%s\".\n",name);
+			return 1;
+		}
+		if(fp=file_load(ninode,FILE_MODE_RW))
+		{
+			if((fp->inode.mode&0170000)==040000)
+			{
+				while(off=file_readdir(fp,off,dirent))
+				{
+					memcpy(new_name,dirent->name,dirent->name_len);
+					new_name[dirent->name_len]=0;
+					if(!strcmp(new_name,".")||!strcmp(new_name,".."))
+					{
+						continue;
+					}
+					if(do_removeall(fp,new_name))
+					{
+						file_release(fp);
+						return 1;
+					}
+				}
+				file_release(fp);
+				if(!file_rmdir(dir,name))
+				{
+					printf("removeall: Cannot remove \"%s\".\n",name);
+					return 1;
+				}
+			}
+			else
+			{
+				file_release(fp);
+				if(!file_unlink(dir,name))
+				{
+					printf("removeall: Cannot remove \"%s\".\n",name);
+					return 1;
+				}
+			}
+		}
+		else
+		{
+			printf("removeall: Cannot remove \"%s\".\n",name);
+			return 1;
+		}
+	}
+	else
+	{
+		printf("removeall: Cannot remove \"%s\".\n",name);
+		return 1;
+	}
+	return 0;
+}
+void cmd_removeall(int argc,char **argv)
+{
+	unsigned int x;
+	unsigned int ninode;
+	if(argc<2)
+	{
+		printf("removeall: Too few arguments\n");
+		return;
+	}
+	x=strlen(argv[1]);
+	struct file *fp;
+	while(x)
+	{
+		x--;
+		if(argv[1][x]=='/')
+		{
+			if(x)
+			{
+				argv[1][x]=0;
+				ninode=find_dirent_by_path(current_dir,argv[1]);
+				x++;
+				break;
+			}
+			else
+			{
+				ninode=2;
+				x++;
+				break;
+			}
+		}
+		else if(!x)
+		{
+			ninode=current_dir;
+		}
+	}
+	
+	if(ninode==0||(fp=file_load(ninode,FILE_MODE_RW))==NULL)
+	{
+		printf("removeall: Cannot remove file.\n");
+		return;
+	}
+	if((fp->inode.mode&0170000)!=040000)
+	{
+		printf("removeall: Cannot remove file.\n");
+		file_release(fp);
+		return;
+	}
+	do_removeall(fp,argv[1]+x);
 	file_release(fp);
 }
 void cmd_symlink(int argc,char **argv)
@@ -794,6 +1009,7 @@ struct _cmd_handler
 {"push","Copy a file to ext2 filesystem.","push [src] [dst] -- Copy src to dst.\n",cmd_push},
 {"pwd","Print current path.","pwd -- Print current path.\n",cmd_pwd},
 {"readlink","Print link target.","readlink [path] -- Print link target.\n",cmd_readlink},
+{"removeall","Remove a file or a directory (AND its contents).","removeall [path] -- Remove a file or a directory (AND its contents).\n",cmd_removeall},
 {"rmdir","Remove an empty directory.","rmdir [path] -- Remove an empty directory.\n",cmd_rmdir},
 {"symlink","Create symbolic link.","symlink [target] [path] -- Create symbolic link of target.\n",cmd_symlink},
 {"unlink","Remove a file.","unlink [path] -- Remove a file (NOT directory).\n",cmd_unlink},
