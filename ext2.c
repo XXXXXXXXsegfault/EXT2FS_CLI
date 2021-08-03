@@ -169,8 +169,8 @@ void save_sb(void)
 	write_raw_blocks(0,buf,buf_size);
 }
 unsigned char ext2_io_lock=0;
-#define CACHE_PAGES 256
-#define CACHE_PAGE_BLOCKS 512
+#define CACHE_PAGES 32
+#define CACHE_PAGE_BLOCKS 4096
 unsigned int p_rand(unsigned int max)
 {
 	static unsigned int t=1234;
@@ -216,6 +216,7 @@ int chance(unsigned int m,unsigned int n)
 }
 struct ext2_cache_struct
 {
+	unsigned int bitmap2[CACHE_PAGE_BLOCKS/32];
 	unsigned int bitmap[CACHE_PAGE_BLOCKS/32];
 	unsigned int start;
 	unsigned char *data;
@@ -259,10 +260,11 @@ X1:
 		{
 			write_raw_blocks(ext2_cache[x].start+y1*32,ext2_cache[x].data+(y1*32<<sb.block_size+10),l*32);
 		}
-		if(mode||chance(1,8));
+		if(mode||chance(1,16));
 		{
 			free(ext2_cache[x].data);
 			ext2_cache[x].data=NULL;
+			memset(ext2_cache[x].bitmap2,0,sizeof(ext2_cache[x].bitmap2));
 		}
 	}
 	if(mode)
@@ -301,7 +303,7 @@ DWORD WINAPI T_ext2_io(LPVOID lpParameter)
 	while(1)
 	{
 		ext2_sync(0);
-		Sleep(2000/CACHE_PAGES+1);
+		Sleep(300);
 	}
 }
 void read_block(unsigned int start,void *ptr)
@@ -321,7 +323,12 @@ void read_block(unsigned int start,void *ptr)
 		{
 			if(ext2_cache[x].start==start1)
 			{
+				if(!ext2_cache[x].bitmap2[start-start1>>5])
+				{
+					read_raw_blocks(start1+((start-start1>>5)<<5),ext2_cache[x].data+((start-start1>>5)<<sb.block_size+15),32);
+				}
 				memcpy(ptr,ext2_cache[x].data+(start-start1<<sb.block_size+10),1<<sb.block_size+10);
+				ext2_cache[x].bitmap2[start-start1>>5]|=1<<(start-start1&31);
 				ext2_io_lock=0;
 				return;
 			}
@@ -334,9 +341,10 @@ void read_block(unsigned int start,void *ptr)
 	}
 	if(x1!=-1&&(ext2_cache[x1].data=malloc(CACHE_PAGE_BLOCKS<<sb.block_size+10)))
 	{
-		read_raw_blocks(start1,ext2_cache[x1].data,CACHE_PAGE_BLOCKS);
+		read_raw_blocks(start1+((start-start1>>5)<<5),ext2_cache[x1].data+((start-start1>>5)<<sb.block_size+15),32);
 		ext2_cache[x1].start=start1;
 		memcpy(ptr,ext2_cache[x1].data+(start-start1<<sb.block_size+10),1<<sb.block_size+10);
+		ext2_cache[x1].bitmap2[start-start1>>5]|=1<<(start-start1&31);
 		ext2_io_lock=0;
 	}
 	else
@@ -360,7 +368,12 @@ void write_block(unsigned int start,void *ptr)
 		{
 			if(ext2_cache[x].start==start1)
 			{
+				if(!ext2_cache[x].bitmap2[start-start1>>5])
+				{
+					read_raw_blocks(start1+((start-start1>>5)<<5),ext2_cache[x].data+((start-start1>>5)<<sb.block_size+15),32);
+				}
 				memcpy(ext2_cache[x].data+(start-start1<<sb.block_size+10),ptr,1<<sb.block_size+10);
+				ext2_cache[x].bitmap2[start-start1>>5]|=1<<(start-start1&31);
 				ext2_cache[x].bitmap[start-start1>>5]|=1<<(start-start1&31);
 				ext2_io_lock=0;
 				return;
@@ -374,9 +387,10 @@ void write_block(unsigned int start,void *ptr)
 	}
 	if(x1!=-1&&(ext2_cache[x1].data=malloc(CACHE_PAGE_BLOCKS<<sb.block_size+10)))
 	{
-		read_raw_blocks(start1,ext2_cache[x1].data,CACHE_PAGE_BLOCKS);
+		read_raw_blocks(start1+((start-start1>>5)<<5),ext2_cache[x1].data+((start-start1>>5)<<sb.block_size+15),32);
 		ext2_cache[x1].start=start1;
 		memcpy(ext2_cache[x1].data+(start-start1<<sb.block_size+10),ptr,1<<sb.block_size+10);
+		ext2_cache[x1].bitmap2[start-start1>>5]|=1<<(start-start1&31);
 		ext2_cache[x1].bitmap[start-start1>>5]|=1<<(start-start1&31);
 		ext2_io_lock=0;
 	}
