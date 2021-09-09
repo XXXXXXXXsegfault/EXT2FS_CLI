@@ -184,7 +184,7 @@ int do_pull(struct file *fpi,char *path)
 			}
 		}
 		return 0;
-		default:printf("pull: Inode %u is not a regular file or a directory, ingored.\n",fpi->ninode);
+		default:printf("pull: Inode %u is not a regular file or a directory, ignored.\n",fpi->ninode);
 		return 0;
 	}
 }
