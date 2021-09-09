@@ -208,7 +208,7 @@ void cmd_pull(int argc,char **argv)
 		printf("pull: Cannot open \"%s\".\n",argv[1]);
 		return;
 	}
-	do_pull(fpi,argv[1]);
+	do_pull(fpi,argv[2]);
 	file_release(fpi);
 }
 int do_push(struct file *dir,char *name,char *path)
