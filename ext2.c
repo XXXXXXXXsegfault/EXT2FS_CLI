@@ -1543,6 +1543,7 @@ void ext2_init(void)
 {
 	LARGE_INTEGER size={0};
 	DISK_GEOMETRY_EX size1={0};
+	PARTITION_INFORMATION_EX size2={0};
 	unsigned int buf;
 	unsigned int gdt_size;
 	unsigned int x=7;
@@ -1552,7 +1553,11 @@ void ext2_init(void)
 		printf("Fatal error: Cannot open \"%s\".\n",dev_path);
 		err_quit();
 	}
-	if(DeviceIoControl(hDev,IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,NULL,0,&size1,sizeof(size1),&buf,0))
+	if(DeviceIoControl(hDev,IOCTL_DISK_GET_PARTITION_INFO_EX,NULL,0,&size2,sizeof(size2),&buf,0))
+	{
+		devsize=size2.PartitionLength.QuadPart;
+	}
+	else if(DeviceIoControl(hDev,IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,NULL,0,&size1,sizeof(size1),&buf,0))
 	{
 		devsize=size1.DiskSize.QuadPart;
 	}
