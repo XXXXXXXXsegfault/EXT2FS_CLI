@@ -21,6 +21,18 @@ asm("lock_set8:");
 asm("xchg %dl,(%rcx)");
 asm("mov %dl,%al");
 asm("ret");
+struct spinlock
+{
+	unsigned char lock[1];
+};
+void spin_lock(struct spinlock *lock)
+{
+	while(lock_set8(lock->lock,1));
+}
+void spin_unlock(struct spinlock *lock)
+{
+	lock_set8(lock->lock,0);
+}
 void input_path_name(void)
 {
 	int x=0;

@@ -125,9 +125,13 @@ void cmd_ls(int argc,char **argv)
 		free(t);
 	}
 }
+void print_progress(unsigned int n,unsigned int speed)
+{
+	printf("%3u.%02u%% %4u.%03u MB/s\r",n/100,n%100,speed/1024,speed%1024*1000/1024);
+}
 int do_pull(struct file *fpi,char *path)
 {
-	static unsigned char buf[8192];
+	static unsigned char buf[65536];
 	unsigned char buf1[264];
 	unsigned int n;
 	FILE *fpo;
@@ -136,6 +140,7 @@ int do_pull(struct file *fpi,char *path)
 	struct ext2_dirent *dirent=(void *)buf1;
 	char *new_path;
 	unsigned int l;
+	unsigned int t,t1;
 	switch(fpi->inode.mode&0170000)
 	{
 		case 0100000:
@@ -144,11 +149,16 @@ int do_pull(struct file *fpi,char *path)
 			printf("pull: Cannot open \"%s\".\n",path);
 			return 1;
 		}
-		while(n=file_read(fpi,off,8192,buf))
+		t=clock();
+		while(n=file_read(fpi,off,65536,buf))
 		{
 			fwrite(buf,n,1,fpo);
 			off+=n;
+			t1=clock();
+			print_progress(off*10000/file_size(&fpi->inode),t1==t?0:off*1000/((t1-t)*1024));
 		}
+		print_progress(10000,t1==t?0:off*1000/((t1-t)*1024));
+		putchar('\n');
 		fclose(fpo);
 		return 0;
 		case 040000:
@@ -164,6 +174,7 @@ int do_pull(struct file *fpi,char *path)
 				continue;
 			}
 			l=strlen(path);
+			printf("Copying %*s\n",dirent->name_len,dirent->name);
 			if(new_fpi=file_load(dirent->inode,FILE_MODE_RO))
 			{
 				if(new_path=malloc(l+dirent->name_len+2))
@@ -214,20 +225,26 @@ void cmd_pull(int argc,char **argv)
 int do_push(struct file *dir,char *name,char *path)
 {
 	unsigned long long int off=0;
-	static unsigned char buf[8192];
+	static unsigned char buf[65536];
 	FILE *fpi;
 	struct file *fpo;
 	HANDLE hfind;
 	WIN32_FIND_DATA fdata;
 	unsigned int ninode,n,l;
 	char *new_path;
+	unsigned long long int fsize;
+	unsigned int t,t1;
 	if(fpi=fopen(path,"rb"))
 	{
 		if(ninode=file_mknod(dir,name,0100644,0,NULL))
 		{
 			if(fpo=file_load(ninode,FILE_MODE_RW))
 			{
-				while(n=fread(buf,1,8192,fpi))
+				fseeko64(fpi,0,SEEK_END);
+				fsize=ftello64(fpi);
+				fseeko64(fpi,0,SEEK_SET);
+				t=clock();
+				while(n=fread(buf,1,65536,fpi))
 				{
 					if(file_write(fpo,off,n,buf)!=n)
 					{
@@ -235,8 +252,12 @@ int do_push(struct file *dir,char *name,char *path)
 						break;
 					}
 					off+=n;
+					t1=clock();
+					print_progress(off*10000/fsize,t1==t?0:off*1000/((t1-t)*1024));
 				}
 				file_release(fpo);
+				print_progress(10000,t1==t?0:off*1000/((t1-t)*1024));
+				putchar('\n');
 			}
 			else
 			{
@@ -269,6 +290,7 @@ int do_push(struct file *dir,char *name,char *path)
 						{
 							continue;
 						}
+						printf("Copying %s\n",fdata.cFileName);
 						strcpy(new_path+l+1,fdata.cFileName);
 						do_push(fpo,fdata.cFileName,new_path);
 					}
