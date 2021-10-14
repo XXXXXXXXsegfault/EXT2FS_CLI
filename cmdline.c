@@ -2,7 +2,14 @@ void cmd_help(int argc,char **argv);
 void cmd_exit(int argc,char **argv)
 {
 	printf("Synchronizing data, please wait.\n");
-	ext2_sync(1);
+	bcache_sync();
+	spin_lock(&ext2_io_lock);
+	while(ext2_cache_count)
+	{
+		ext2_sync(1);
+	}
+	save_sb();
+	spin_unlock(&ext2_io_lock);
 	exit(0);
 }
 unsigned int current_dir=2;
