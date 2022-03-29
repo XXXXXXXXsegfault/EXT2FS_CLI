@@ -89,6 +89,7 @@ unsigned long long int devsize;
 HANDLE hDev;
 unsigned int groups;
 struct spinlock dev_io_lock={0};
+
 void read_raw_blocks(unsigned int off,void *ptr,unsigned int count)
 {
 	LARGE_INTEGER off_b={0};
@@ -167,10 +168,181 @@ void save_sb(void)
 	}
 	write_raw_blocks(0,buf,buf_size);
 }
+#define BCACHE_PAGES 512
+struct bitmap_cache
+{
+	unsigned char bmp[4096];
+	unsigned int pos;
+} bcache[BCACHE_PAGES]={0};
+int bcache_x=0;
+
+#define CACHE_PAGES 512
+#define CACHE_PAGE_BLOCKS 512
+struct ext2_cache
+{
+	struct ext2_cache *next;
+	unsigned int start;
+	unsigned int update;
+	void *buf;
+} *ext2_cache,*ext2_cache_end;
+struct spinlock ext2_io_lock;
+int count_cache_pages=0;
+void *ext2_cache_new(unsigned int start)
+{
+	struct ext2_cache *node=ext2_cache;
+	while(node)
+	{
+		if(node->start==start)
+		{
+			return node->buf;
+		}
+		node=node->next;
+	}
+	if((node=malloc(sizeof(*node)))==NULL)
+	{
+		return NULL;
+	}
+	if((node->buf=malloc(CACHE_PAGE_BLOCKS<<sb.block_size+10))==NULL)
+	{
+		free(node);
+		return NULL;
+	}
+	read_raw_blocks(start,node->buf,CACHE_PAGE_BLOCKS);
+	node->start=start;
+	node->update=0;
+	node->next=NULL;
+	if(ext2_cache_end)
+	{
+		ext2_cache_end->next=node;
+	}
+	else
+	{
+		ext2_cache=node;
+	}
+	ext2_cache_end=node;
+	count_cache_pages++;
+	return node->buf;
+}
+int ext2_cache_update(unsigned int start)
+{
+	struct ext2_cache *node=ext2_cache;
+	while(node)
+	{
+		if(node->start==start)
+		{
+			node->update=1;
+			return 0;
+		}
+		node=node->next;
+	}
+	return 1;
+}
+int ext2_sync(unsigned char mode)
+{
+	struct ext2_cache *node;
+	unsigned char *buf;
+	buf=malloc(CACHE_PAGE_BLOCKS<<sb.block_size+10);
+	if(!buf)
+	{
+		return 1;
+	}
+	if(!mode)
+	{
+		spin_lock(&ext2_io_lock);
+	}
+	node=ext2_cache;
+	if(!node)
+	{
+		if(!mode)
+		{
+			spin_unlock(&ext2_io_lock);
+		}
+		free(buf);
+		return 0;
+	}
+	while(node->update)
+	{
+		memcpy(buf,node->buf,CACHE_PAGE_BLOCKS<<sb.block_size+10);
+		node->update=0;
+		if(!mode)
+		{
+			spin_unlock(&ext2_io_lock);
+		}
+		write_raw_blocks(node->start,buf,CACHE_PAGE_BLOCKS);
+		if(!mode)
+		{
+			spin_lock(&ext2_io_lock);
+		}
+	}
+	
+	ext2_cache=node->next;
+	free(node->buf);
+	free(node);
+	count_cache_pages--;
+	if(!mode)
+	{
+		spin_unlock(&ext2_io_lock);
+	}
+	free(buf);
+	return 1;
+}
+DWORD WINAPI T_ext2_io(LPVOID lpParameter)
+{
+	int n,t=0;
+	while(1)
+	{
+		if(count_cache_pages>CACHE_PAGES*3/4||t>=60)
+		{
+			n=count_cache_pages;
+			do
+			{
+				ext2_sync(0);
+			}
+			while(count_cache_pages>n*3/4);
+			t=0;
+		}
+		t++;
+		Sleep(50);
+	}
+}
+void read_block(unsigned int start,void *ptr)
+{
+	unsigned int off=start%CACHE_PAGE_BLOCKS;
+	unsigned int start1=start-off;
+	unsigned char *buf;
+	spin_lock(&ext2_io_lock);
+	buf=ext2_cache_new(start1);
+	if(buf==NULL)
+	{
+		read_raw_blocks(start,ptr,1);
+		spin_unlock(&ext2_io_lock);
+		return;
+	}
+	memcpy(ptr,buf+(off<<sb.block_size+10),1<<sb.block_size+10);
+	spin_unlock(&ext2_io_lock);
+}
+void write_block(unsigned int start,void *ptr)
+{
+	unsigned int off=start%CACHE_PAGE_BLOCKS;
+	unsigned int start1=start-off;
+	unsigned char *buf;
+	spin_lock(&ext2_io_lock);
+	buf=ext2_cache_new(start1);
+	if(buf==NULL)
+	{
+		write_raw_blocks(start,ptr,1);
+		spin_unlock(&ext2_io_lock);
+		return;
+	}
+	memcpy(buf+(off<<sb.block_size+10),ptr,1<<sb.block_size+10);
+	ext2_cache_update(start1);
+	spin_unlock(&ext2_io_lock);
+}
+/*
 struct spinlock ext2_io_lock={0};
 #define CACHE_PAGES 256
 #define CACHE_PAGE_BLOCKS 1024
-#define BCACHE_PAGES 128
+
 struct ext2_cache_struct
 {
 	unsigned int bitmap2[CACHE_PAGE_BLOCKS/32];
@@ -181,12 +353,7 @@ struct ext2_cache_struct
 } ext2_cache[CACHE_PAGES]={0};
 int ext2_cache_head=-1,ext2_cache_end=-1;
 int ext2_cache_count=0;
-struct bitmap_cache
-{
-	unsigned char bmp[4096];
-	unsigned int pos;
-} bcache[BCACHE_PAGES]={0};
-int bcache_x=0;
+
 void ext2_sync(unsigned char mode)
 {
 	unsigned int x;
@@ -387,6 +554,7 @@ void write_block(unsigned int start,void *ptr)
 		spin_unlock(&ext2_io_lock);
 	}
 }
+*/
 void bcache_read(unsigned int pos,void *buf)
 {
 	int x=0;

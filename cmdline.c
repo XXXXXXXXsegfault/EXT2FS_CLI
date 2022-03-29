@@ -4,10 +4,8 @@ void cmd_exit(int argc,char **argv)
 	printf("Synchronizing data, please wait.\n");
 	bcache_sync();
 	spin_lock(&ext2_io_lock);
-	while(ext2_cache_count)
-	{
-		ext2_sync(1);
-	}
+	while(ext2_sync(1));
+	
 	save_sb();
 	spin_unlock(&ext2_io_lock);
 	exit(0);
@@ -181,7 +179,7 @@ int do_pull(struct file *fpi,char *path)
 				continue;
 			}
 			l=strlen(path);
-			printf("Copying %*s\n",dirent->name_len,dirent->name);
+			printf("Copying %.*s\n",dirent->name_len,dirent->name);
 			if(new_fpi=file_load(dirent->inode,FILE_MODE_RO))
 			{
 				if(new_path=malloc(l+dirent->name_len+2))

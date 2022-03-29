@@ -5,7 +5,7 @@
 char dev_path_buf[4096];
 char *dev_path;
 unsigned char mode=0;
-void ext2_sync(unsigned char mode);
+int ext2_sync(unsigned char mode);
 void err_quit(void)
 {
 	if(mode)
