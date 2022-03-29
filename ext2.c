@@ -276,6 +276,10 @@ int ext2_sync(unsigned char mode)
 	}
 	
 	ext2_cache=node->next;
+	if(!ext2_cache)
+	{
+		ext2_cache_end=NULL;
+	}
 	free(node->buf);
 	free(node);
 	count_cache_pages--;
