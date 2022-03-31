@@ -7,7 +7,6 @@ void cmd_exit(int argc,char **argv)
 	while(ext2_sync(1));
 	
 	save_sb();
-	spin_unlock(&ext2_io_lock);
 	exit(0);
 }
 unsigned int current_dir=2;
